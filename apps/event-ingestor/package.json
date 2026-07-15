@@ -1,0 +1,23 @@
+{
+  "name": "@notification-system/event-ingestor",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "kafkajs": "^2.2.4",
+    "zod": "^3.23.0",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.4.0",
+    "@notification-system/shared-types": "*"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/uuid": "^9.0.8",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.0"
+  }
+}
