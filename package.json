@@ -12,6 +12,7 @@
     "seed": "node scripts/seed.js",
     "setup": "bash scripts/setup.sh"
   },
+  "packageManager": "npm@11.6.0",
   "devDependencies": {
     "turbo": "^2.0.0"
   }
