@@ -1,23 +1,36 @@
 import express from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { env } from './config/env';
-import { connectProducer, publishEvent, disconnectProducer } from './services/publisher';
-import { IngestEventSchema } from './validators/eventSchema';
+import dotenv from 'dotenv';
+import { NotificationEventSchema } from '@notification-system/shared-types';
+import { KafkaProducer, KafkaTopics, defaultConfig } from '@notification-system/shared-kafka';
+import { generateId, generateTraceId, now } from '@notification-system/shared-utils';
+import { createLogger } from '@notification-system/shared-logger';
+import { metricsMiddleware, metricsEndpoint } from '@notification-system/shared-metrics';
 
+dotenv.config();
+
+const logger = createLogger('event-ingestor');
 const app = express();
 app.use(express.json());
+app.use(metricsMiddleware);
+
+const producer = new KafkaProducer(defaultConfig({
+  clientId: 'event-ingestor',
+  brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(',')
+}));
 
 app.post('/events', async (req, res) => {
   try {
-    const parsed = IngestEventSchema.parse(req.body);
+    const parsed = NotificationEventSchema.omit({ id: true, timestamp: true, traceId: true }).parse(req.body);
+    
     const event = {
       ...parsed,
-      id: parsed.id || uuidv4(),
-      traceId: parsed.traceId || uuidv4(),
-      timestamp: new Date().toISOString()
+      id: generateId(),
+      traceId: generateTraceId(),
+      timestamp: now()
     };
 
-    await publishEvent('notifications.events', event);
+    await producer.sendSingle(KafkaTopics.NOTIFICATION_EVENTS, event);
+    logger.info('Event published', { eventId: event.id, type: event.type });
 
     res.status(202).json({
       success: true,
@@ -25,7 +38,12 @@ app.post('/events', async (req, res) => {
       traceId: event.traceId
     });
   } catch (err: any) {
-    res.status(400).json({ success: false, error: err.message });
+    if (err.name === 'ZodError') {
+      logger.warn('Validation failed', { error: err.message });
+      return res.status(400).json({ success: false, error: err.message });
+    }
+    logger.error('Failed to publish event', { error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -33,14 +51,19 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'event-ingestor' });
 });
 
+app.get('/metrics', metricsEndpoint);
+
 async function start() {
-  await connectProducer();
-  app.listen(env.PORT, () => {
-    console.log(`🚀 Event Ingestor running on port ${env.PORT}`);
+  await producer.connect();
+  logger.info('Kafka producer connected');
+  
+  const port = process.env.EVENT_INGESTOR_PORT || 3001;
+  app.listen(port, () => {
+    logger.info(`Event Ingestor running on port ${port}`);
   });
 
   process.on('SIGTERM', async () => {
-    await disconnectProducer();
+    await producer.disconnect();
     process.exit(0);
   });
 }
