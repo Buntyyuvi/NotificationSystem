@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/shared-types" },
+    { "path": "../../packages/shared-kafka" },
+    { "path": "../../packages/shared-redis" },
+    { "path": "../../packages/shared-db" },
+    { "path": "../../packages/shared-utils" },
+    { "path": "../../packages/shared-logger" }
+  ]
+}
