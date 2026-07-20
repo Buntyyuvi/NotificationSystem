@@ -1,0 +1,55 @@
+.authToggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 32px;
+  background: #1e293b;
+  border-radius: 16px;
+  border: 1px solid #334155;
+  max-width: 400px;
+  margin: 40px auto;
+}
+
+.status {
+  font-size: 1.2rem;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.loginBtn,
+.logoutBtn {
+  padding: 10px 28px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.loginBtn {
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.logoutBtn {
+  background: #ef4444;
+  color: white;
+}
+
+.loginBtn:hover,
+.logoutBtn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.badge {
+  background: #22c55e;
+  color: white;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
