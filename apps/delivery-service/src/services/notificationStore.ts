@@ -1,4 +1,4 @@
-import { Notification} from '@notification-system/shared-db';
+import { Notification } from '@notification-system/shared-db';
 import { DeliveryStatus } from '@notification-system/shared-types';
 import { createLogger } from '@notification-system/shared-logger';
 
@@ -12,6 +12,12 @@ export async function saveNotification(data: {
   channels: string[];
   priority: string;
 }): Promise<string> {
+  const existing = await Notification.findOne({ eventId: data.eventId });
+  if (existing) {
+    logger.info('Notification already exists, updating', { eventId: data.eventId });
+    return existing._id.toString();
+  }
+
   const notification = await Notification.create({
     eventId: data.eventId,
     userId: data.userId,
@@ -19,7 +25,7 @@ export async function saveNotification(data: {
     payload: data.payload,
     channels: data.channels,
     priority: data.priority,
-    status: DeliveryStatus.PENDING,
+    status: DeliveryStatus.PENDING
   });
 
   logger.info('Notification saved', { notificationId: notification._id, eventId: data.eventId });
@@ -32,13 +38,23 @@ export async function updateNotificationStatus(
   status: DeliveryStatus,
   errorMessage?: string
 ): Promise<void> {
-  await Notification.updateOne(
-    { eventId },
-    { 
-      $set: { status, errorMessage, ...(status === DeliveryStatus.DELIVERED ? { deliveredAt: new Date() } : {}) },
-      $push: { deliveryAttempts: { channel, status, attemptedAt: new Date() } }
+  const update: Record<string, unknown> = {
+    status,
+    errorMessage
+  };
+
+  if (status === DeliveryStatus.DELIVERED) {
+    update.deliveredAt = new Date();
+  } else if (status === DeliveryStatus.FAILED) {
+    update.failedAt = new Date();
+  }
+
+  await Notification.updateOne({ eventId }, {
+    $set: update,
+    $push: {
+      deliveryAttempts: { channel, status, attemptedAt: new Date() }
     }
-  );
-  
+  });
+
   logger.info('Notification status updated', { eventId, status, channel });
 }
