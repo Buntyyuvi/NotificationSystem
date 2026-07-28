@@ -3,36 +3,34 @@ import { KafkaConsumer, KafkaTopics, defaultConfig } from '@notification-system/
 import { createLogger } from '@notification-system/shared-logger';
 import { getRedisClient } from '@notification-system/shared-redis';
 import { env } from './config/env';
-import { deliverNotification } from './services/deliveryEngine';
+import { addDeliveryJob, startDeliveryWorker } from './services/deliveryQueue';
 
 const logger = createLogger('delivery-service');
 
 async function start() {
   await connectDB(env.MONGODB_URI);
-  
   const redis = getRedisClient(env.REDIS_URL);
   await redis.ping();
   logger.info('Redis connected');
+
+  startDeliveryWorker();
 
   const consumer = new KafkaConsumer(defaultConfig({
     clientId: 'delivery-service',
     brokers: env.KAFKA_BROKERS,
     groupId: 'delivery-service-group'
   }));
-
   await consumer.connect();
   logger.info('Kafka connected');
-
   await consumer.subscribe([KafkaTopics.NOTIFICATION_ROUTED]);
 
   await consumer.run(async ({ message }) => {
     if (!message.value) return;
-
     const payload = JSON.parse(message.value.toString());
-    logger.info('Delivery job received', { eventId: payload.eventId, channels: payload.resolvedChannels });
+    logger.info('Delivery job received', { eventId: payload.eventId });
 
     try {
-      await deliverNotification({
+      await addDeliveryJob({
         eventId: payload.id || payload.eventId,
         userId: payload.userId,
         type: payload.type,
@@ -40,11 +38,8 @@ async function start() {
         content: payload.payload,
         priority: payload.priority
       });
-
-      logger.info('Delivery completed', { eventId: payload.eventId });
-
     } catch (error: any) {
-      logger.error('Delivery failed', { eventId: payload.eventId, error: error.message });
+      logger.error('Failed to queue delivery', { eventId: payload.eventId, error: error.message });
     }
   });
 
