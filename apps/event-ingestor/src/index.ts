@@ -54,7 +54,15 @@ app.get('/health', (_req, res) => {
 app.get('/metrics', metricsEndpoint);
 
 async function start() {
-  await producer.connect();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await producer.connect();
+      break;
+    } catch (err: any) {
+      logger.warn(`Kafka connect failed (attempt ${attempt}), retrying in 5s`, { error: err.message });
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
   logger.info('Kafka producer connected');
   
   const port = process.env.EVENT_INGESTOR_PORT || 3001;
@@ -68,4 +76,7 @@ async function start() {
   });
 }
 
-start();
+start().catch(err => {
+  logger.error('Fatal error', { error: err.message });
+  process.exit(1);
+});

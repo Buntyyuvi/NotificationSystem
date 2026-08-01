@@ -1,17 +1,33 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-FROM base AS deps
-COPY apps/web/package.json apps/web/package-lock.json* ./apps/web/
-RUN cd apps/web && npm ci
+ARG VITE_API_URL=http://localhost:3000
+ARG VITE_WS_URL=http://localhost:3002
+ARG VITE_FIREBASE_API_KEY=
+ARG VITE_FIREBASE_AUTH_DOMAIN=
+ARG VITE_FIREBASE_PROJECT_ID=
+ARG VITE_FIREBASE_STORAGE_BUCKET=
+ARG VITE_FIREBASE_MESSAGING_SENDER_ID=
+ARG VITE_FIREBASE_APP_ID=
+ARG VITE_FIREBASE_VAPID_KEY=
 
-FROM base AS builder
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
-COPY apps/web ./apps/web
-RUN cd apps/web && npm run build
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_WS_URL=$VITE_WS_URL
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY
+ENV VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN
+ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
+ENV VITE_FIREBASE_STORAGE_BUCKET=$VITE_FIREBASE_STORAGE_BUCKET
+ENV VITE_FIREBASE_MESSAGING_SENDER_ID=$VITE_FIREBASE_MESSAGING_SENDER_ID
+ENV VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
+ENV VITE_FIREBASE_VAPID_KEY=$VITE_FIREBASE_VAPID_KEY
+
+COPY . .
+RUN npm install
+RUN npx turbo run build --filter=@notification-system/web
 
 FROM nginx:alpine AS runner
 COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
-COPY infra/docker/nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/infra/docker/nginx/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

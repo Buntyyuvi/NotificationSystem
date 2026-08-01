@@ -20,7 +20,15 @@ async function start() {
     groupId: 'delivery-service-group'
   }));
 
-  await consumer.connect();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await consumer.connect();
+      break;
+    } catch (err: any) {
+      logger.warn(`Kafka connect failed (attempt ${attempt}), retrying in 5s`, { error: err.message });
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
   logger.info('Kafka connected');
 
   await consumer.subscribe([KafkaTopics.NOTIFICATION_ROUTED]);
