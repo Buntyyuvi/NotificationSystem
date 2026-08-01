@@ -1,6 +1,10 @@
 import { io } from 'socket.io-client';
 
-export const socket = io('http://localhost:3002', {
+const WS_URL: string =
+  (import.meta.env.VITE_WS_URL as string) ||
+  (typeof window !== 'undefined' ? window.location.origin : '');
+
+export const socket = io(WS_URL, {
   transports: ['websocket', 'polling'],
   reconnection: true,
   reconnectionAttempts: 5,

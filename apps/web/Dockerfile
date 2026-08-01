@@ -2,8 +2,8 @@ FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-ARG VITE_API_URL=http://localhost:3000
-ARG VITE_WS_URL=http://localhost:3002
+ARG VITE_API_URL=/api
+ARG VITE_WS_URL=
 ARG VITE_FIREBASE_API_KEY=
 ARG VITE_FIREBASE_AUTH_DOMAIN=
 ARG VITE_FIREBASE_PROJECT_ID=
