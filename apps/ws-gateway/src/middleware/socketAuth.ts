@@ -7,19 +7,17 @@ export interface AuthenticatedSocket extends Socket {
 }
 
 export const socketAuth = (socket: AuthenticatedSocket, next: (err?: Error) => void): void => {
-//   const token = socket.handshake.auth.token || socket.handshake.query.token;
+  const token = socket.handshake.auth.token || socket.handshake.query.token;
 
-//   if (!token || typeof token !== 'string') {
-//     return next(new Error('Authentication error: Token required'));
-//   }
+  if (!token || typeof token !== 'string') {
+    return next(new Error('Authentication error: Token required'));
+  }
 
-//   try {
-//     const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string };
-//     socket.userId = decoded.userId;
-//     next();
-//   } catch (err) {
-//     next(new Error('Authentication error: Invalid token'));
-//   }
-  socket.userId = 'user-1'; // DEBUG ONLY
-  next();
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string };
+    socket.userId = decoded.userId;
+    next();
+  } catch (err) {
+    next(new Error('Authentication error: Invalid token'));
+  }
 };

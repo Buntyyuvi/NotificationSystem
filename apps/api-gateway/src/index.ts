@@ -5,7 +5,9 @@ import rateLimit from 'express-rate-limit';
 import { connectDB } from '@notification-system/shared-db';
 import { createLogger } from '@notification-system/shared-logger';
 import { env } from './config/env';
+import { authRoutes } from './routes/auth';
 import { notificationRoutes } from './routes/notifications';
+import { preferenceRoutes } from './routes/preferences';
 import { authMiddleware } from './middleware/auth';
 
 const logger = createLogger('api-gateway');
@@ -27,11 +29,12 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'api-gateway' });
 });
 
-// Auth middleware (bypass for now)
-app.use(authMiddleware);
+// Auth routes (public: register/login)
+app.use('/auth', authRoutes);
 
-// Routes
-app.use('/notifications', notificationRoutes);
+// Protected routes
+app.use('/notifications', authMiddleware, notificationRoutes);
+app.use('/preferences', authMiddleware, preferenceRoutes);
 
 async function start() {
   await connectDB(env.MONGODB_URI);

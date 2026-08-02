@@ -1,12 +1,21 @@
+import { useEffect } from 'react';
 import AuthToggle from './components/AuthToggle';
 import NotificationList from './components/NotificationList';
 import {
   NotificationProvider,
   useNotificationContext
 } from './context/NotificationContext';
+import { AuthProvider, useAuthContext } from './context/AuthContext';
 
 function AppContent() {
-  const { connected, liveNotifications } = useNotificationContext();
+  const { user } = useAuthContext();
+  const { connected, liveNotifications, refresh } = useNotificationContext();
+
+  useEffect(() => {
+    if (user) {
+      void refresh();
+    }
+  }, [user, refresh]);
 
   return (
     <div style={{ padding: 40, fontFamily: 'system-ui', maxWidth: 800, margin: '0 auto' }}>
@@ -54,9 +63,11 @@ function AppContent() {
 
 function App() {
   return (
-    <NotificationProvider>
-      <AppContent />
-    </NotificationProvider>
+    <AuthProvider>
+      <NotificationProvider>
+        <AppContent />
+      </NotificationProvider>
+    </AuthProvider>
   );
 }
 

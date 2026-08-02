@@ -14,6 +14,7 @@ export interface INotification extends Document {
   deliveredAt?: Date;
   failedAt?: Date;
   errorMessage?: string;
+  readAt?: Date;
   createdAt: Date;
 }
 
@@ -29,7 +30,8 @@ const NotificationSchema = new Schema<INotification>({
   sentAt: { type: Date },
   deliveredAt: { type: Date },
   failedAt: { type: Date },
-  errorMessage: { type: String }
+  errorMessage: { type: String },
+  readAt: { type: Date }
 }, { timestamps: true });
 
 export const Notification = mongoose.model<INotification>('Notification', NotificationSchema);

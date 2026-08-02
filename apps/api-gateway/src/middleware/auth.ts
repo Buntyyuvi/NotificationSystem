@@ -1,11 +1,24 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 
 export interface AuthRequest extends Request {
   userId?: string;
 }
 
-export const authMiddleware = (req: AuthRequest, _res: Response, next: NextFunction): void => {
-  // TEMPORARY: Auto-assign user-1 for testing
-  req.userId = 'user-1';
-  next();
+export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Unauthorized: Missing token' });
+    return;
+  }
+
+  const token = header.slice(7);
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string };
+    req.userId = decoded.userId;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
 };
