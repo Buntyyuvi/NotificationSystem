@@ -1,41 +1,18 @@
-import { useEffect, useState } from 'react';
-import { socket } from './config/socket';
 import AuthToggle from './components/AuthToggle';
 import NotificationList from './components/NotificationList';
+import {
+  NotificationProvider,
+  useNotificationContext
+} from './context/NotificationContext';
 
-interface LiveNotification {
-  eventId: string;
-  type: string;
-  title: string;
-  body: string;
-  timestamp: string;
-}
-
-function App() {
-  const [connected, setConnected] = useState(false);
-  const [liveNotifications, setLiveNotifications] = useState<LiveNotification[]>([]);
-
-  useEffect(() => {
-    socket.on('connect', () => setConnected(true));
-    socket.on('disconnect', () => setConnected(false));
-    socket.on('notification:new', (data: LiveNotification) => {
-      setLiveNotifications(prev => [data, ...prev]);
-    });
-
-    if (socket.connected) setConnected(true);
-
-    return () => {
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.off('notification:new');
-    };
-  }, []);
+function AppContent() {
+  const { connected, liveNotifications } = useNotificationContext();
 
   return (
     <div style={{ padding: 40, fontFamily: 'system-ui', maxWidth: 800, margin: '0 auto' }}>
       <h1>🔔 Notification System</h1>
-      
-      <div style={{ 
+
+      <div style={{
         display: 'inline-block',
         padding: '6px 16px',
         borderRadius: 20,
@@ -72,6 +49,14 @@ function App() {
       {/* Notification history from API */}
       <NotificationList />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <NotificationProvider>
+      <AppContent />
+    </NotificationProvider>
   );
 }
 
