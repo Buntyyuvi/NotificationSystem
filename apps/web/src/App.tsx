@@ -6,10 +6,13 @@ import {
   useNotificationContext
 } from './context/NotificationContext';
 import { AuthProvider, useAuthContext } from './context/AuthContext';
+import { usePushNotifications } from './hooks/usePushNotifications';
 
 function AppContent() {
   const { user } = useAuthContext();
   const { connected, liveNotifications, refresh } = useNotificationContext();
+
+  usePushNotifications(user);
 
   useEffect(() => {
     if (user) {

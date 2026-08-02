@@ -13,6 +13,13 @@ const logger = createLogger('api-gateway');
 const SALT_ROUNDS = 10;
 const TOKEN_TTL = '7d';
 
+const DEFAULT_PREFERENCES = [
+  { channel: 'websocket', enabled: true, digestMode: false },
+  { channel: 'email', enabled: true, digestMode: false },
+  { channel: 'push', enabled: false, digestMode: false },
+  { channel: 'sms', enabled: false, digestMode: false }
+];
+
 function signToken(userId: string): string {
   return jwt.sign({ userId }, env.JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
@@ -49,7 +56,7 @@ router.post('/register', async (req, res) => {
       userId: `user-${randomUUID()}`,
       email: normalizedEmail,
       passwordHash,
-      preferences: []
+      preferences: DEFAULT_PREFERENCES
     });
 
     logger.info('User registered', { userId: user.userId });

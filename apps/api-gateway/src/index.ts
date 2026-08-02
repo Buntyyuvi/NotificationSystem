@@ -6,6 +6,7 @@ import { connectDB } from '@notification-system/shared-db';
 import { createLogger } from '@notification-system/shared-logger';
 import { env } from './config/env';
 import { authRoutes } from './routes/auth';
+import { deviceRoutes } from './routes/devices';
 import { notificationRoutes } from './routes/notifications';
 import { preferenceRoutes } from './routes/preferences';
 import { authMiddleware } from './middleware/auth';
@@ -35,6 +36,7 @@ app.use('/auth', authRoutes);
 // Protected routes
 app.use('/notifications', authMiddleware, notificationRoutes);
 app.use('/preferences', authMiddleware, preferenceRoutes);
+app.use('/devices', authMiddleware, deviceRoutes);
 
 async function start() {
   await connectDB(env.MONGODB_URI);
