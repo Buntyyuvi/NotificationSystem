@@ -16,29 +16,32 @@ interface DeliveryPayload {
   eventId: string;
   userId: string;
   type: string;
-  channels: NotificationChannel[];
-  content: Record<string, unknown>;
+  channels: string[];
+  payload: Record<string, unknown>;
   priority: string;
 }
 
 export async function deliverNotification(
   payload: DeliveryPayload,
-): Promise<void> {
+): Promise<boolean> {
   const user = await User.findOne({ userId: payload.userId });
 
   if (!user) {
     logger.warn("User not found", { userId: payload.userId });
-    return;
+    return true;
   }
-  // Save notification to history first
+
+  // Save notification to history first (idempotent by eventId)
   await saveNotification({
     eventId: payload.eventId,
     userId: payload.userId,
     type: payload.type,
-    payload: payload.content,
+    payload: payload.payload,
     channels: payload.channels,
     priority: payload.priority,
   });
+
+  let allSuccess = true;
 
   for (const channel of payload.channels) {
     const startTime = Date.now();
@@ -51,7 +54,7 @@ export async function deliverNotification(
             payload.userId,
             payload.eventId,
             payload.type,
-            payload.content,
+            payload.payload,
           );
           break;
 
@@ -59,7 +62,7 @@ export async function deliverNotification(
           result = await sendPush(
             user.devices.map((d) => d.token),
             payload.type.replace(/_/g, " "),
-            JSON.stringify(payload.content),
+            JSON.stringify(payload.payload),
             { eventId: payload.eventId, type: payload.type },
           );
           break;
@@ -68,15 +71,15 @@ export async function deliverNotification(
           result = await sendEmail(
             user.email,
             `${payload.type.replace(/_/g, " ")}`,
-            `<p>${JSON.stringify(payload.content)}</p>`,
-            JSON.stringify(payload.content),
+            `<p>${JSON.stringify(payload.payload)}</p>`,
+            JSON.stringify(payload.payload),
           );
           break;
 
         case NotificationChannel.SMS:
           result = await sendSMS(
             user.phone || "",
-            `${payload.type}: ${JSON.stringify(payload.content).slice(0, 100)}`,
+            `${payload.type}: ${JSON.stringify(payload.payload).slice(0, 100)}`,
           );
           break;
 
@@ -96,6 +99,17 @@ export async function deliverNotification(
         completedAt: new Date(),
       });
 
+      await updateNotificationStatus(
+        payload.eventId,
+        channel,
+        result.success ? DeliveryStatus.DELIVERED : DeliveryStatus.FAILED,
+        result.error
+      );
+
+      if (!result.success) {
+        allSuccess = false;
+      }
+
       logger.info("Delivery attempt", {
         eventId: payload.eventId,
         channel,
@@ -112,6 +126,7 @@ export async function deliverNotification(
         completedAt: new Date(),
       });
 
+      allSuccess = false;
       logger.error("Delivery crashed", {
         eventId: payload.eventId,
         channel,
@@ -119,4 +134,6 @@ export async function deliverNotification(
       });
     }
   }
+
+  return allSuccess;
 }
