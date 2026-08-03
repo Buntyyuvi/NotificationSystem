@@ -43,7 +43,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       connected: socketState.connected,
       markAsRead: notificationsState.markAsRead,
       markAllAsRead: notificationsState.markAllAsRead,
-      refresh: () => notificationsState.refresh(),
+      refresh: notificationsState.refresh,
       loadMore: notificationsState.loadMore
     }),
     [

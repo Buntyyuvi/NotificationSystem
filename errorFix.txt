@@ -318,3 +318,29 @@ FIX:
   - /health stays exempt.
   Verified: 105 rapid authenticated GET /notifications calls -> all 200,
   zero 429s.
+
+----------------------------------------------------------------------
+ERROR 12: Infinite React re-render loop caused repeated 429s from the browser
+----------------------------------------------------------------------
+SYMPTOM:
+  After fixing the server rate limits, the browser STILL got 429 on
+  GET /api/notifications. The api-gateway reported RateLimit-Remaining: 999
+  from the host, yet the browser's IP was exhausted within minutes.
+
+ROOT CAUSE:
+  A React infinite loop in the web app. App.tsx ran `refresh()` in a
+  useEffect keyed on `[user, refresh]`. But NotificationContext exposed
+  `refresh` as an inline closure created inside a `useMemo`, and that useMemo
+  recomputed whenever `notifications` changed. Since `refresh()` (fetchNotifications)
+  always calls setNotifications with a fresh array, every request produced a
+  new `notifications` reference -> new useMemo value -> new `refresh` closure
+  -> effect re-ran -> another request -> forever. The browser hammered
+  /api/notifications at dozens of requests/sec, burning the rate-limit budget.
+
+FIX:
+  apps/web/src/context/NotificationContext.tsx now exposes the STABLE
+  useCallback references directly (`refresh`, `markAsRead`, `markAllAsRead`,
+  `loadMore`) instead of wrapping them in inline closures inside useMemo.
+  The App.tsx effect no longer re-runs, so exactly one fetch happens per
+  login instead of an unbounded loop. Deployed a new web bundle
+  (index-Cv61X8_M.js); hard-refresh the browser to pick it up.
