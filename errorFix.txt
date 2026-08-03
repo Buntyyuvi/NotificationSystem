@@ -291,3 +291,30 @@ PHASE 5 & 6 - RETRY/DLQ + FINAL VERIFICATION (DONE)
   - Live push + history: socket receives notification:new, event in history
     (status delivered), unread count 1 -> mark-all-read -> 0
   - Real email attempt + full retry/DLQ cycle reproduced on the fresh stack
+
+----------------------------------------------------------------------
+ERROR 11: HTTP 429 "Too many requests" on the web UI (notifications fetch)
+----------------------------------------------------------------------
+SYMPTOM:
+  While using the live web UI, the browser console showed:
+    Failed to fetch notifications AxiosError: Request failed with status code 429
+  History/unread calls randomly failed until the page worked again later.
+
+ROOT CAUSE:
+  apps/api-gateway applied a single GLOBAL express-rate-limit of 100 requests
+  per 15 min per IP to EVERY endpoint. Because the gateway ran behind nginx
+  without `app.set('trust proxy', ...)`, express-rate-limit keyed on the
+  nginx container IP, so ALL browser traffic (every user, every reload, every
+  history/unread/mark-read call) shared one 100-request budget. Normal UI
+  usage tripped it within minutes.
+
+FIX:
+  Reworked rate limiting in apps/api-gateway/src/index.ts:
+  - `app.set('trust proxy', 1)` so limits key on the real client IP from
+    nginx's X-Forwarded-For header instead of the shared proxy IP.
+  - Strict limiter ONLY on /auth (max 50 / 15 min) for brute-force protection.
+  - Generous limiter on /notifications, /preferences, /devices
+    (max 1000 / 15 min per client) so the UI never 429s in normal use.
+  - /health stays exempt.
+  Verified: 105 rapid authenticated GET /notifications calls -> all 200,
+  zero 429s.

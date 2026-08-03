@@ -15,15 +15,36 @@ const logger = createLogger('api-gateway');
 
 const app = express();
 
+// Requests arrive via the nginx proxy which sets X-Forwarded-For;
+// trust that single hop so rate limits key on the real client IP.
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
 app.use(express.json());
 
-// Rate limiting
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-}));
+// Brute-force protection: strict limit on auth endpoints only
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts, please try again later' }
+});
+
+// Generous per-client limit for the authenticated API (history, prefs, devices)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' }
+});
+
+app.use('/auth', authLimiter);
+app.use('/notifications', apiLimiter);
+app.use('/preferences', apiLimiter);
+app.use('/devices', apiLimiter);
 
 // Health check
 app.get('/health', (_req, res) => {
