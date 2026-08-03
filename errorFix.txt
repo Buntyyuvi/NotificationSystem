@@ -227,3 +227,67 @@ END-TO-END VERIFICATION (docker compose up)
 - api-gateway REST verified: GET /notifications (list + pagination +
   unread meta), GET /notifications/unread-count,
   PATCH /notifications/read-all all return 200 with correct data.
+
+----------------------------------------------------------------------
+ERROR 9: BullMQ needs a dedicated IORedis connection per Queue/Worker
+----------------------------------------------------------------------
+SYMPTOM:
+  After wiring up BullMQ, TypeScript failed to compile delivery-service
+  (Cannot find name 'queueConnection') and, at runtime, sharing a single
+  Redis connection between a Queue and Worker is unreliable in BullMQ v5.
+
+ROOT CAUSE:
+  The original plan used one shared `queueConnection`. BullMQ requires its
+  own connection instance per Queue and per Worker (dedicated IORedis), so
+  a single shared connection is not usable for both.
+
+FIX:
+  Refactored apps/delivery-service/src/queue/deliveryQueue.ts to export a
+  `createQueueConnection()` factory (one IORedis per caller, tracked for
+  clean shutdown via closeQueues()). deliveryWorker.ts and dlqWorker.ts now
+  call `connection: createQueueConnection()`.
+
+----------------------------------------------------------------------
+ERROR 10: BullMQ v5 has no 'retrying' event; 'failed' fires on EVERY attempt
+----------------------------------------------------------------------
+SYMPTOM:
+  Trying to listen for a `retrying` event to mark notifications RETRYING
+  failed — the event does not exist in bullmq 5.80.9. The 'failed' event
+  fires on every failed attempt, so a naive handler would move the job to
+  the DLQ after the very first failure.
+
+ROOT CAUSE:
+  BullMQ v5 emits `failed` per attempt; there is no separate retry event.
+
+FIX:
+  In deliveryWorker.ts, branch inside the 'failed' handler on
+  `job.attemptsMade >= (job.opts.attempts || 1)`:
+  - final attempt  -> add job to the DLQ queue + mark notification FAILED
+  - earlier attempt -> mark notification RETRYING (job auto-retries with
+    exponential backoff)
+  Queue config: 4 attempts, backoff { type: 'exponential', delay: 5000 },
+  jobId = eventId (idempotent enqueue).
+
+----------------------------------------------------------------------
+PHASE 5 & 6 - RETRY/DLQ + FINAL VERIFICATION (DONE)
+----------------------------------------------------------------------
+- delivery-service now runs a BullMQ delivery queue + dead-letter queue.
+  Kafka events are enqueued; inline delivery is a fallback if enqueue fails.
+- Notification model gained `deliveryAttempts[]` (channel/status/attemptedAt).
+- notificationStore is idempotent (upsert by eventId) and tracks per-channel
+  delivery status + whole-notification deliveredAt/failedAt.
+- Verified failure path E2E (invalid SendGrid key -> email "Forbidden"):
+    1. POST /events (channels=[email]) -> 202
+    2. delivery logs: Email failed -> "will retry" (attempt 1..3, status retrying)
+    3. attempt 4 -> "exhausted retries, sending to DLQ" -> "Dead-letter job processed"
+    4. Mongo: status=failed, failedAt set, 4 deliveryAttempts, 4 DeliveryLog rows
+- Verified success path E2E: websocket notification delivered via BullMQ,
+  status=delivered, 1 attempt, DeliveryLog row created.
+- FINAL VERIFICATION (Phase 6, full docker compose up -d --build):
+  - turbo run build --force: 13/13 tasks pass
+  - All 10 containers Up; Mongo/Redis/Kafka connected across all services
+  - Health: web :80 200, api-gateway :3000 ok, event-ingestor :3001 ok
+  - Auth: register/login -> JWT -> /auth/me 200; missing/bad token -> 401
+  - Live push + history: socket receives notification:new, event in history
+    (status delivered), unread count 1 -> mark-all-read -> 0
+  - Real email attempt + full retry/DLQ cycle reproduced on the fresh stack
