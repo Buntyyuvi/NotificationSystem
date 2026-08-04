@@ -47,7 +47,7 @@ export async function sendEmail(
     logger.info('Email sent', { to, subject });
     return { success: true };
   } catch (error: any) {
-    logger.error('Email send failed', { to, error: error.message });
+    logger.error('Email failed', { to, error: error.message });
     return { success: false, error: error.message };
   }
 }

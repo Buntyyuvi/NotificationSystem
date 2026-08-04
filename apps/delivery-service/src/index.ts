@@ -17,8 +17,6 @@ async function start() {
   await redis.ping();
   logger.info('Redis connected');
 
-  startDeliveryWorker();
-
   const consumer = new KafkaConsumer(defaultConfig({
     clientId: 'delivery-service',
     brokers: env.KAFKA_BROKERS,
@@ -35,12 +33,14 @@ async function start() {
     }
   }
   logger.info('Kafka connected');
+
   await consumer.subscribe([KafkaTopics.NOTIFICATION_ROUTED]);
 
   await consumer.run(async ({ message }) => {
     if (!message.value) return;
+
     const payload = JSON.parse(message.value.toString());
-    logger.info('Delivery job received', { eventId: payload.eventId });
+    logger.info('Delivery job received', { eventId: payload.eventId, channels: payload.resolvedChannels });
 
     const jobData = {
       eventId: payload.id || payload.eventId,

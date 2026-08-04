@@ -37,29 +37,29 @@ function AppContent() {
         {connected ? '🟢 WebSocket Connected' : '🔴 Disconnected'}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        {(['dashboard', 'notifications', 'settings'] as const).map(p => (
-          <button key={p} onClick={() => setPage(p)} style={{
-            padding: '8px 20px', borderRadius: 8, border: 'none',
-            background: page === p ? '#38bdf8' : '#1e293b',
-            color: page === p ? '#0f172a' : '#94a3b8',
-            fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize'
-          }}>{p}</button>
-        ))}
-      </div>
+      <AuthToggle />
 
-      {page === 'dashboard' && <Dashboard />}
-      {page === 'notifications' && <NotificationsPage />}
-      {page === 'settings' && <SettingsPage />}
-
-      {selectedNotification && (
-        <NotificationDetail
-          notification={selectedNotification}
-          onClose={() => setSelectedNotification(null)}
-        />
+      {/* Live notifications */}
+      {liveNotifications.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <h3 style={{ color: '#e2e8f0' }}>🔴 Live</h3>
+          {liveNotifications.map(n => (
+            <div key={n.eventId} style={{
+              background: '#1e293b',
+              border: '1px solid #38bdf8',
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 8
+            }}>
+              <strong style={{ color: '#38bdf8' }}>{n.title}</strong>
+              <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>{n.body}</p>
+            </div>
+          ))}
+        </div>
       )}
 
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+      {/* Notification history from API */}
+      <NotificationList />
     </div>
   );
 }

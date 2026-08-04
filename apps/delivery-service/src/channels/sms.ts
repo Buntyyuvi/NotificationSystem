@@ -41,7 +41,7 @@ export async function sendSMS(
     logger.info('SMS sent', { to, sid: message.sid });
     return { success: true };
   } catch (error: any) {
-    logger.error('SMS send failed', { to, error: error.message });
+    logger.error('SMS failed', { to, error: error.message });
     return { success: false, error: error.message };
   }
 }

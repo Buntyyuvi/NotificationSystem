@@ -344,3 +344,60 @@ FIX:
   The App.tsx effect no longer re-runs, so exactly one fetch happens per
   login instead of an unbounded loop. Deployed a new web bundle
   (index-Cv61X8_M.js); hard-refresh the browser to pick it up.
+
+ERROR 13: PR #17 (phase/6-final-verification) merge conflict with origin/main
+--------------------------------------------------------------------------
+SYMPTOM:
+  PR #17 showed 26 conflicting files. `git merge origin/main` produced a
+  merge commit, but a `turbo run build --force` FAILED on the web app with
+  errors like "Cannot find name 'toast'", "Property 'fetchNotifications'
+  does not exist", "No exported member 'useAuth'", etc.
+
+ROOT CAUSE:
+  main had a DIFFERENT (older, divergent) web UI implementation. The
+  3-way merge applied main's changes CLEANLY (not as conflicts) into many
+  of our files because they touched different lines, so `-X ours` never
+  kicked in for them. The result was a Frankenstein App.tsx (our providers
+  + main's nav/toast/pages) plus orphaned main-only files that referenced
+  names that no longer existed.
+
+  Files polluted by main but that we own, all restored from aac42a8:
+    - apps/api-gateway/src/index.ts        (main re-added the GLOBAL 100/15min
+                                            rateLimit = the exact ERROR 11 bug!)
+    - apps/delivery-service/src/index.ts   (main added startDeliveryWorker()
+                                            which referenced its own file)
+    - apps/delivery-service/src/channels/{email,push,sms}.ts (log wording only)
+    - apps/ws-gateway/src/socket/connection.ts (main changed origin '*' ->
+                                            env.CORS_ORIGIN + credentials:true)
+    - apps/web/tsconfig.json               (main added "types": ["vite/client"])
+    - apps/web/package.json                (duplicate "firebase" key, main's
+                                            ^10.12.0 + our ^12.17.0 both present)
+    - apps/delivery-service/tsconfig.json  (main added module:commonjs causing
+                                            TS5110 with base moduleResolution)
+    - apps/web/src/App.tsx                 (main's nav bar + toast + pages)
+
+  Deleted main-only orphan files (never part of our implementation):
+    - apps/web/src/components/{Toast,NotificationBell,NotificationDetail,
+       PreferencePanel,PushPermission}/
+    - apps/web/src/pages/{Dashboard,Notifications,Settings}/
+    - apps/web/src/services/socketService.ts
+    - apps/delivery-service/src/services/deliveryQueue.ts (hardcoded
+       localhost:6379 Redis bug, dead code after index.ts restored)
+
+FIX:
+  1) `git checkout aac42a8 -- <each file we own>` to force-restore our
+     verified versions (aac42a8 = phase/6 + the two 429 fixes).
+  2) `git rm` the main-only orphan files.
+  3) `git grep -lE '^(<<<<<<<|>>>>>>>)'` across apps/ -> confirmed no
+     leftover conflict markers.
+  4) `npm install` to resync package-lock.json after restoring
+     apps/web/package.json (removed the duplicate firebase key).
+  5) `./node_modules/.bin/turbo run build --force` -> 13/13 tasks pass.
+  6) Verified the 429 fix survived: api-gateway has trust proxy 1, a strict
+     /auth limiter, a generous /notifications,/preferences,/devices limiter,
+     and NO global rateLimit.
+
+LESSON:
+  After ANY `-X ours` merge, always diff the whole tree against your own
+  pre-merge HEAD (`git diff <your-commit> --stat`) and restore every file
+  you own. "Auto-resolved, no conflicts" does NOT mean your side won.
