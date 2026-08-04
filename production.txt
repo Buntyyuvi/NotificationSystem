@@ -1,0 +1,114 @@
+============================================================
+ PRODUCTION-READY PLAN - Notification System
+============================================================
+
+Goal: Turn the working real-time WebSocket pipeline into a
+production-ready system: persistent history UI, real auth,
+real email/push/SMS delivery, and reliable delivery with retry/DLQ.
+
+Workflow: Implement in 6 phases. After EACH phase, create a
+branch with a suitable name, commit, and open a PR. Do not merge
+until the user reviews.
+
+------------------------------------------------------------
+ PHASE 1 - Fix web <-> API connectivity (foundation)
+------------------------------------------------------------
+Problem: The web app calls http://localhost:3000 directly from the
+browser. From the Docker web container (served at http://localhost),
+this is cross-origin and the api-gateway CORS allows only
+http://localhost:5173, so history fetching fails in Docker.
+
+Steps:
+  1. Use the nginx proxy instead of cross-origin calls:
+     - apps/web/src/config/api.ts         -> base URL '/api'
+     - apps/web/src/config/socket.ts      -> connect via VITE_WS_URL
+       with fallback to same-origin /socket.io (nginx proxies it)
+     - apps/web/src/services/notificationApi.ts -> use config/api
+  2. Wire build args into infra/docker/docker-compose.yml (web
+     service) and fix default ARG values in apps/web/Dockerfile so
+     the built bundle uses /api and same-origin socket.io.
+  3. Optional: add vite.config.ts dev proxy for /api and /socket.io
+     so local `npm run dev` parity also works.
+  4. Verify history loads on page refresh in Docker.
+
+------------------------------------------------------------
+ PHASE 2 - Complete history / read / unread UI
+------------------------------------------------------------
+Steps:
+  1. Real Notifications page (apps/web/src/pages/Notifications):
+     paginated history, "load more", status filter, unread badge.
+  2. Enhance NotificationList / useNotifications:
+     - merge live socket notifications into the history list
+     - auto-refetch unread count on 'notification:new'
+     - "Mark all read" button + per-item read/unread toggle
+  3. Fill in empty files:
+     - context/NotificationContext.tsx, hooks/useSocket.ts
+     - types/notification.ts, types/preference.ts, types/user.ts
+     - utils/formatDate.ts, utils/sound.ts
+  4. Style improvements for dashboard look (unread dot, hover).
+
+------------------------------------------------------------
+ PHASE 3 - Real auth + user management (JWT)
+------------------------------------------------------------
+Steps:
+  1. apps/api-gateway: add auth routes
+     - POST /auth/register  (create user, hash password w/ bcrypt)
+     - POST /auth/login     (verify, return JWT signed w/ JWT_SECRET)
+     - GET  /auth/me        (return current user)
+  2. Use the existing shared-db User model (email, phone, devices,
+     preferences) to persist users.
+  3. Enable real authMiddleware in apps/api-gateway/src/middleware/auth.ts
+     (parse Bearer token -> req.userId). Remove the user-1 bypass.
+  4. Enable real socketAuth in apps/ws-gateway/src/middleware/socketAuth.ts
+     (verify JWT from handshake -> socket.userId). Remove user-1 bypass.
+  5. Web login/signup UI (replaces fake AuthToggle), store token,
+     attach to axios (Authorization header) and socket handshake.
+  6. Add preference management API so a user can enable/disable
+     email/push/sms/websocket channels.
+
+------------------------------------------------------------
+ PHASE 4 - Real email / push / SMS delivery
+------------------------------------------------------------
+Steps:
+  1. Install deps in apps/delivery-service:
+     @sendgrid/mail, twilio, firebase-admin (+ types)
+  2. Implement real channels:
+     - channels/email.ts -> SendGrid (SENDGRID_API_KEY, FROM_EMAIL)
+     - channels/sms.ts   -> Twilio (ACCOUNT_SID, AUTH_TOKEN, PHONE_NUMBER)
+     - channels/push.ts  -> Firebase Admin sendMulticast to user
+                            device tokens (parse FIREBASE_PRIVATE_KEY
+                            correctly, incl. multi-line newlines)
+  3. Web: config/firebase.ts + hooks/usePushNotifications.ts to
+     register the browser device token and POST it to the API so the
+     user's `devices` array is populated for FCM web push.
+  4. Ensure deliveryEngine passes user.email / user.phone /
+     user.devices correctly (already reads them).
+  5. Test with a real email/phone you can receive messages on.
+
+------------------------------------------------------------
+ PHASE 5 - Reliability (BullMQ retry + DLQ)
+------------------------------------------------------------
+Steps:
+  1. Wire up BullMQ (dep already present) in delivery-service:
+     - deliveryQueue.ts -> Queue for delivery jobs
+     - Worker with retries + exponential backoff
+     - Dead-letter queue for permanent failures
+     - On exhausted retries, mark notification status=FAILED via
+       updateNotificationStatus
+  2. deliveryEngine publishes jobs instead of processing inline.
+  3. Update shared-redis usage so the BullMQ connection reuses the
+     existing client/URL handling.
+  4. Test failure path (invalid recipient -> retries -> DLQ -> failed).
+
+------------------------------------------------------------
+ PHASE 6 - Final verification
+------------------------------------------------------------
+Steps:
+  1. npx turbo run build --force (all packages pass)
+  2. Rebuild all 6 Docker images
+  3. docker compose up -d --build; wait for Kafka; all 10 containers Up
+  4. e2e test: socket.io client + curl event -> live push + history
+  5. Verify auth: register/login -> JWT -> authed REST call
+  6. Verify a real email/SMS/push attempt in logs
+  7. Update errorFix.txt / README with final run instructions
+  8. PR for phase 6

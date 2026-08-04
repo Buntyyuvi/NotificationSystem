@@ -1,28 +1,32 @@
-import * as admin from 'firebase-admin';
+import { initializeApp, cert, type App } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 import { createLogger } from '@notification-system/shared-logger';
+import { env } from '../config/env';
 
 const logger = createLogger('delivery-service');
 
-let firebaseInitialized = false;
+let app: App | null = null;
 
-function initializeFirebase(): void {
-  if (firebaseInitialized) return;
+function isConfigured(): boolean {
+  return Boolean(
+    env.FIREBASE_PROJECT_ID &&
+    env.FIREBASE_CLIENT_EMAIL &&
+    env.FIREBASE_PRIVATE_KEY
+  );
+}
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+function ensureApp(): boolean {
+  if (app) return true;
+  if (!isConfigured()) return false;
 
-  if (!projectId || !privateKey || !clientEmail) {
-    logger.warn('Firebase credentials not configured, push notifications disabled');
-    return;
-  }
-
-  admin.initializeApp({
-    credential: admin.credential.cert({ projectId, privateKey, clientEmail })
+  app = initializeApp({
+    credential: cert({
+      projectId: env.FIREBASE_PROJECT_ID!,
+      clientEmail: env.FIREBASE_CLIENT_EMAIL!,
+      privateKey: env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g, '\n')
+    })
   });
-
-  firebaseInitialized = true;
-  logger.info('Firebase Admin initialized');
+  return true;
 }
 
 export async function sendPush(
@@ -30,47 +34,38 @@ export async function sendPush(
   title: string,
   body: string,
   data: Record<string, string>
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; skipped?: boolean }> {
   try {
-    initializeFirebase();
-
-    if (!firebaseInitialized) {
-      logger.warn('Firebase not initialized, skipping push', { tokenCount: deviceTokens.length });
-      return { success: true };
-    }
-
     if (deviceTokens.length === 0) {
-      return { success: true };
+      logger.info('Push skipped: no device tokens', { title });
+      return { success: true, skipped: true };
     }
 
-    const message: admin.messaging.MulticastMessage = {
-      tokens: deviceTokens,
+    if (!ensureApp()) {
+      logger.info('Push skipped: Firebase not configured', { title });
+      return { success: true, skipped: true };
+    }
+
+    const response = await getMessaging(app!).sendEachForMulticast({
       notification: { title, body },
       data,
-      android: { priority: 'high' },
-      apns: { payload: { aps: { 'content-available': 1 } } }
-    };
-
-    const response = await admin.messaging().sendEachForMulticast(message);
+      tokens: deviceTokens
+    });
 
     logger.info('Push sent', {
       successCount: response.successCount,
       failureCount: response.failureCount
     });
 
-    if (response.failureCount > 0) {
-      const failedTokens: string[] = [];
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success) {
-          failedTokens.push(deviceTokens[idx]);
-        }
-      });
-      logger.warn('Some push notifications failed', { failedTokens });
-    }
-
-    return { success: response.successCount > 0 };
+    return {
+      success: response.failureCount === 0,
+      error:
+        response.failureCount > 0
+          ? `${response.failureCount} token(s) failed`
+          : undefined
+    };
   } catch (error: any) {
-    logger.error('Push notification failed', { error: error.message });
+    logger.error('Push failed', { error: error.message });
     return { success: false, error: error.message };
   }
 }

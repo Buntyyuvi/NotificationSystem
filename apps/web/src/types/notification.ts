@@ -3,16 +3,15 @@ export interface Notification {
   eventId: string;
   type: string;
   payload: Record<string, unknown>;
-  status: 'pending' | 'sent' | 'delivered' | 'failed' | 'retrying';
-  readAt?: string;
-  deliveredAt?: string;
-  failedAt?: string;
   channels: string[];
-  priority: 'low' | 'medium' | 'high' | 'urgent';
+  priority: string;
+  status: string;
+  readAt?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
-export interface PaginatedNotifications {
+export interface NotificationListResponse {
   notifications: Notification[];
   pagination: {
     page: number;
@@ -23,4 +22,12 @@ export interface PaginatedNotifications {
   meta: {
     unread: number;
   };
+}
+
+export interface LiveNotification {
+  eventId: string;
+  type: string;
+  title: string;
+  body: string;
+  timestamp: string;
 }

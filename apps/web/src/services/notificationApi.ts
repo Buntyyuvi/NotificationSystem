@@ -1,17 +1,15 @@
-import axios from 'axios';
-
-const API_URL = 'http://localhost:3000';
+import { httpClient } from './httpClient';
 
 export const notificationApi = {
-  getNotifications: (page = 1, limit = 20) => 
-    axios.get(`${API_URL}/notifications`, { params: { page, limit } }),
-  
-  getUnreadCount: () => 
-    axios.get(`${API_URL}/notifications/unread-count`),
-  
-  markAsRead: (id: string) => 
-    axios.patch(`${API_URL}/notifications/${id}/read`),
-  
-  markAllAsRead: () => 
-    axios.patch(`${API_URL}/notifications/read-all`)
+  getNotifications: (page = 1, limit = 20) =>
+    httpClient.get('/notifications', { params: { page, limit } }),
+
+  getUnreadCount: () =>
+    httpClient.get('/notifications/unread-count'),
+
+  markAsRead: (id: string) =>
+    httpClient.patch(`/notifications/${id}/read`),
+
+  markAllAsRead: () =>
+    httpClient.patch('/notifications/read-all')
 };

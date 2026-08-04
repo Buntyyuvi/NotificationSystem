@@ -1,50 +1,47 @@
-import * as twilio from 'twilio';
+import twilio from 'twilio';
 import { createLogger } from '@notification-system/shared-logger';
+import { env } from '../config/env';
 
 const logger = createLogger('delivery-service');
 
-const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const FROM_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+let client: ReturnType<typeof twilio> | null = null;
 
-let twilioClient: twilio.Twilio | null = null;
+function isConfigured(): boolean {
+  return Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN);
+}
 
-function getClient(): twilio.Twilio | null {
-  if (twilioClient) return twilioClient;
-  if (!ACCOUNT_SID || !AUTH_TOKEN) {
-    logger.warn('Twilio not configured, SMS disabled');
-    return null;
-  }
-  twilioClient = twilio(ACCOUNT_SID, AUTH_TOKEN);
-  return twilioClient;
+function ensureClient(): boolean {
+  if (client) return true;
+  if (!isConfigured()) return false;
+  client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
+  return true;
 }
 
 export async function sendSMS(
   to: string,
   body: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; skipped?: boolean }> {
   try {
-    const client = getClient();
-
-    if (!client) {
-      logger.warn('Twilio client not initialized, skipping SMS', { to });
-      return { success: true };
+    if (!to) {
+      logger.info('SMS skipped: no recipient phone', { body: body.slice(0, 20) });
+      return { success: true, skipped: true };
     }
 
-    if (!FROM_NUMBER) {
-      return { success: false, error: 'TWILIO_PHONE_NUMBER not configured' };
+    if (!ensureClient() || !env.TWILIO_PHONE_NUMBER) {
+      logger.info('SMS skipped: Twilio not configured', { to });
+      return { success: true, skipped: true };
     }
 
-    await client.messages.create({
+    const message = await client!.messages.create({
       body,
-      from: FROM_NUMBER,
+      from: env.TWILIO_PHONE_NUMBER,
       to
     });
 
-    logger.info('SMS sent successfully', { to });
+    logger.info('SMS sent', { to, sid: message.sid });
     return { success: true };
   } catch (error: any) {
-    logger.error('SMS send failed', { to, error: error.message });
+    logger.error('SMS failed', { to, error: error.message });
     return { success: false, error: error.message };
   }
 }

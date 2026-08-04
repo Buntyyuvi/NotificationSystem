@@ -1,7 +1,9 @@
-import { api } from '../config/api';
+import { httpClient } from './httpClient';
+import type { UserPreference } from '../types/user';
 
 export const preferenceApi = {
-  getPreferences: () => api.get('/preferences'),
-  updatePreference: (channel: string, updates: Record<string, unknown>) =>
-    api.patch(`/preferences/${channel}`, updates)
+  get: () => httpClient.get<{ preferences: UserPreference[] }>('/preferences'),
+
+  update: (preferences: UserPreference[]) =>
+    httpClient.put<{ preferences: UserPreference[] }>('/preferences', { preferences })
 };

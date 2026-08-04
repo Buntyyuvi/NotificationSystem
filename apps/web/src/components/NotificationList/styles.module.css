@@ -27,6 +27,16 @@
   font-weight: 600;
 }
 
+.markAllBtn {
+  background: #334155;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .refreshBtn {
   margin-left: auto;
   background: #38bdf8;
@@ -36,6 +46,23 @@
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
+}
+
+.loadMoreBtn {
+  width: 100%;
+  margin-top: 16px;
+  background: transparent;
+  color: #38bdf8;
+  border: 1px solid #38bdf8;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.loadMoreBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .loading, .empty {

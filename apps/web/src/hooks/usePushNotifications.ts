@@ -1,37 +1,50 @@
-import { useState, useEffect } from 'react';
-import { initFirebase, messaging } from '../config/firebase';
+import { useEffect, useRef } from 'react';
+import {
+  getFirebaseConfig,
+  getPushToken,
+  isFirebaseConfigured
+} from '../config/firebase';
 import { pushService } from '../services/pushService';
+import type { User } from '../types/user';
 
-export function usePushNotifications() {
-  const [permission, setPermission] = useState<NotificationPermission>('default');
-  const [token, setToken] = useState<string | null>(null);
+function registerServiceWorker(): void {
+  if (!('serviceWorker' in navigator)) return;
+  const config = getFirebaseConfig();
+  navigator.serviceWorker
+    .register('/firebase-messaging-sw.js')
+    .then(async () => {
+      const active = await navigator.serviceWorker.ready;
+      active.active?.postMessage({ type: 'FIREBASE_CONFIG', config });
+    })
+    .catch(err => console.error('Service worker registration failed', err));
+}
+
+export function usePushNotifications(user: User | null): void {
+  const registered = useRef(false);
 
   useEffect(() => {
-    if ('Notification' in window) {
-      setPermission(Notification.permission);
-    }
-  }, []);
+    if (!user || !isFirebaseConfigured() || registered.current) return;
 
-  const requestPermission = async () => {
-    try {
-      const result = await Notification.requestPermission();
-      setPermission(result);
+    let cancelled = false;
 
-      if (result === 'granted' && messaging) {
-        const fcmToken = await pushService.getToken(messaging);
-        if (fcmToken) {
-          setToken(fcmToken);
-          await pushService.registerToken(fcmToken);
-        }
+    (async () => {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        await Notification.requestPermission();
       }
-    } catch (err) {
-      console.error('Push permission failed:', err);
-    }
-  };
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        return;
+      }
 
-  useEffect(() => {
-    initFirebase();
-  }, []);
+      registerServiceWorker();
+      const token = await getPushToken();
+      if (cancelled || !token) return;
 
-  return { permission, token, requestPermission };
+      await pushService.registerDevice(token, 'web');
+      registered.current = true;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 }

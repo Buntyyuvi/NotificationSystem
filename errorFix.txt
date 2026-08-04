@@ -1,0 +1,403 @@
+============================================
+ Notification System - Error & Fix Log
+============================================
+
+----------------------------------------------------------------------
+ERROR 1: `npm ci` fails inside Docker - "Missing: <pkg> from lock file"
+----------------------------------------------------------------------
+SYMPTOM:
+  npm ci failed with dozens of lines like:
+    npm ERR! Missing: jest@^29.7.0 from lock file
+    npm ERR! Missing: ts-jest@^29.1.0 from lock file
+  caused the docker build to abort at the `npm install`/`npm ci` step.
+
+ROOT CAUSE:
+  Dependencies (jest, ts-jest, @types/jest) were added to package.json
+  but package-lock.json was never regenerated, so the lockfile was out
+  of sync. `npm ci` requires the lockfile to exactly match package.json.
+
+FIX:
+  Run `npm install` at the repo root to regenerate package-lock.json:
+    cd my-turborepo
+    npm install
+  This re-syncs the lockfile with package.json. Also created a
+  .dockerignore so node_modules, dist, .env etc. are not copied into the
+  Docker build context (keeps the context small and avoids stale state).
+
+----------------------------------------------------------------------
+ERROR 2: TS1259 - Module 'winston' can only be default-imported
+          using 'esModuleInterop'
+----------------------------------------------------------------------
+SYMPTOM:
+  During the TypeScript build stage of the Docker image:
+    error TS1259: Module '"/app/packages/shared-logger/node_modules/winston"'
+    can only be default-imported using the 'esModuleInterop' flag.
+
+ROOT CAUSE:
+  Every package and app tsconfig extended the root `../../tsconfig.json`,
+  which is a SOLUTION-STYLE file (only `files: []`, `references`, and
+  compiler options that DO NOT include `esModuleInterop`). The real shared
+  compiler options live in `tsconfig.base.json`, which has
+  `esModuleInterop: true`.
+
+FIX:
+  Changed every package/app tsconfig to extend the correct base:
+    "extends": "../../tsconfig.base.json"
+  Files updated:
+    packages/shared-db/tsconfig.json
+    packages/shared-kafka/tsconfig.json
+    packages/shared-logger/tsconfig.json
+    packages/shared-metrics/tsconfig.json
+    packages/shared-redis/tsconfig.json
+    packages/shared-utils/tsconfig.json
+    apps/api-gateway/tsconfig.json        (file was also missing - created)
+    apps/delivery-service/tsconfig.json
+    apps/event-ingestor/tsconfig.json
+    apps/event-router/tsconfig.json
+    apps/ws-gateway/tsconfig.json
+
+----------------------------------------------------------------------
+ERROR 3: api-gateway compile errors (TS2349 / TS7006 / TS1259)
+----------------------------------------------------------------------
+SYMPTOM:
+  `import * as express` / `import * as cors` broke the compile once
+  esModuleInterop was enabled, with errors like:
+    error TS2349: This expression is not callable
+    error TS1259: Module can only be default-imported using esModuleInterop
+
+ROOT CAUSE:
+  With `esModuleInterop` enabled, namespace imports (`import * as x`)
+  are not callable for CommonJS modules like express/cors.
+
+FIX:
+  Changed to default imports in apps/api-gateway/src/index.ts:
+    import express from 'express';   // was: import * as express
+    import cors from 'cors';         // was: import * as cors
+
+----------------------------------------------------------------------
+ERROR 4: helmet@7 is ESM-only and breaks the CommonJS build
+----------------------------------------------------------------------
+SYMPTOM:
+  After fixing the imports, the api-gateway build still failed when
+  resolving `helmet` (TS1479 or module resolution error), because
+  helmet v7 is published as ESM-only.
+
+ROOT CAUSE:
+  The project compiles to CommonJS (module: NodeNext with CJS output),
+  which cannot require() an ESM-only package.
+
+FIX:
+  Downgraded helmet from ^7.1.0 to ^6.1.0 in apps/api-gateway/package.json:
+    "helmet": "^6.1.0"
+  Then re-ran `npm install` to update package-lock.json.
+
+----------------------------------------------------------------------
+ERROR 5: TS2307 - Cannot find module '@notification-system/shared-types'
+          (in shared-db models)
+----------------------------------------------------------------------
+SYMPTOM:
+  Docker build (fresh, no turbo cache) failed:
+    packages/shared-db/src/models/DeliveryLog.ts(2,53):
+      error TS2307: Cannot find module '@notification-system/shared-types'
+    (same error in Notification.ts, Template.ts, User.ts)
+  Locally the build passed because a previously built dist/ + turbo cache
+  masked the problem.
+
+ROOT CAUSE:
+  packages/shared-db imports types from @notification-system/shared-types
+  but never declared it as a dependency in package.json. Turbo could not
+  know that shared-db's build depends on shared-types' build, so in a
+  clean Docker build it compiled shared-db in parallel before
+  shared-types' dist/ existed.
+
+FIX:
+  Added the missing dependency in packages/shared-db/package.json:
+    "dependencies": {
+      "mongoose": "^8.4.0",
+      "@notification-system/shared-types": "*"
+    }
+  Re-ran `npm install` and verified the whole monorepo builds clean from
+  scratch with `npx turbo run build --force`.
+
+----------------------------------------------------------------------
+ERROR 6: ioredis crashes the process - "Unhandled error event
+          [ECONNREFUSED]" / "MaxRetriesPerRequestError"
+----------------------------------------------------------------------
+SYMPTOM:
+  ws-gateway / event-router / delivery-service crashed on startup with:
+    [ioredis] Unhandled error event: AggregateError [ECONNREFUSED]
+    MaxRetriesPerRequestError: Reached the max retries per request limit
+
+ROOT CAUSE (two bugs):
+  1. packages/shared-redis/src/client.ts created `new Redis(url)` with no
+     `.on('error')` handler. When the connection is refused (e.g. Redis
+     not ready yet), ioredis emits an 'error' event; with no listener the
+     Node process crashes. ioredis would otherwise auto-reconnect.
+  2. presence.ts / rateLimit.ts / pubsub.ts call `getRedisClient()` with
+     NO url argument, so the fallback `redis://localhost:6379` was used.
+     Inside a container `localhost` is the container itself -> refused.
+     ws-gateway/connection.ts passed env.REDIS_URL explicitly, so only the
+     shared modules were affected.
+
+FIX:
+  packages/shared-redis/src/client.ts now:
+    - uses process.env.REDIS_URL as the fallback url,
+    - attaches `redisClient.on('error', ...)` (suppresses the unhandled
+      event so ioredis keeps retrying),
+    - sets maxRetriesPerRequest: null and a retryStrategy so `ping()`
+      waits for Redis instead of throwing.
+
+----------------------------------------------------------------------
+ERROR 7: App services crash-loop because Kafka/Redis aren't ready yet
+          (startup race) and have no restart policy
+----------------------------------------------------------------------
+SYMPTOM:
+  event-ingestor / event-router / delivery-service exited on first start
+  with `ECONNREFUSED ... :29092` because Kafka takes 30-60s to become
+  ready (group coordinator / topic leader not available yet).
+
+ROOT CAUSE:
+  `await producer.connect()` / `consumer.connect()` run once at startup
+  with no retry, and the compose services had no restart policy, so a
+  transient startup failure left them permanently down.
+
+FIX:
+  1. Added retry loops in each service around the Kafka connect:
+       apps/event-ingestor/src/index.ts
+       apps/event-router/src/index.ts
+       apps/delivery-service/src/index.ts
+     (retry every 5s until Kafka is reachable).
+  2. Added `restart: unless-stopped` to every service in
+     infra/docker/docker-compose.yml so any transient failure self-heals.
+
+----------------------------------------------------------------------
+ERROR 8: Docker services can't reach each other - "localhost" in .env
+----------------------------------------------------------------------
+SYMPTOM:
+  Containers started but couldn't connect to Mongo/Redis/Kafka because
+  the .env file (used for local `npm run dev`) points at localhost.
+
+ROOT CAUSE:
+  Inside a container, `localhost` refers to the container itself, not the
+  host machine. So MONGODB_URI / REDIS_URL / KAFKA_BROKERS from .env were
+  unreachable from the Docker services.
+
+FIX:
+  Added per-service `environment:` overrides in docker-compose.yml so the
+  containers use the compose service hostnames, while .env keeps its
+  localhost values for local development:
+    api-gateway:      MONGODB_URI=...@mongo:27017/...
+    event-ingestor:   KAFKA_BROKERS=kafka:29092
+    event-router:     MONGODB_URI=...@mongo, REDIS_URL=redis://redis:6379,
+                      KAFKA_BROKERS=kafka:29092
+    delivery-service: same as event-router
+    ws-gateway:       REDIS_URL=redis://redis:6379
+  (Kafka uses kafka:29092 because 29092 is the container-internal
+  listener; localhost:9092 is only for host access.)
+
+----------------------------------------------------------------------
+RESULT
+----------------------------------------------------------------------
+- `npx turbo run build`        : 13/13 tasks pass (including --force run)
+- All 6 Docker images build    : api-gateway, event-ingestor,
+                                 event-router, delivery-service,
+                                 ws-gateway, web
+- Note: apps/web image shows "SecretsUsedInArgOrEnv" warnings for the
+  VITE_FIREBASE_* build args. These are public client-side Firebase config
+  values (they ship in the browser bundle anyway), so the warnings are
+  expected and safe to ignore.
+
+----------------------------------------------------------------------
+END-TO-END VERIFICATION (docker compose up)
+----------------------------------------------------------------------
+- All 10 containers start and stay healthy (infra + 5 apps + web).
+- Health checks: web :80 -> 200, api-gateway :3000 -> ok,
+  event-ingestor :3001 -> ok. (ws-gateway :3002 exposes no HTTP route,
+  it only handles socket.io.)
+- Full real-time pipeline test passed:
+    1. socket.io client connects to ws-gateway :3002
+    2. POST /events to event-ingestor :3001 (type=price_drop,
+       userId=user-1, channels=[websocket])
+    3. event-router received event, routed it (websocket, online),
+       published to Redis channel notifications:websocket
+    4. delivery-service saved notification to Mongo and delivered
+       websocket via Redis
+    5. ws-gateway emitted 'notification:new' to room user-1
+    6. client received the notification with correct payload
+- api-gateway REST verified: GET /notifications (list + pagination +
+  unread meta), GET /notifications/unread-count,
+  PATCH /notifications/read-all all return 200 with correct data.
+
+----------------------------------------------------------------------
+ERROR 9: BullMQ needs a dedicated IORedis connection per Queue/Worker
+----------------------------------------------------------------------
+SYMPTOM:
+  After wiring up BullMQ, TypeScript failed to compile delivery-service
+  (Cannot find name 'queueConnection') and, at runtime, sharing a single
+  Redis connection between a Queue and Worker is unreliable in BullMQ v5.
+
+ROOT CAUSE:
+  The original plan used one shared `queueConnection`. BullMQ requires its
+  own connection instance per Queue and per Worker (dedicated IORedis), so
+  a single shared connection is not usable for both.
+
+FIX:
+  Refactored apps/delivery-service/src/queue/deliveryQueue.ts to export a
+  `createQueueConnection()` factory (one IORedis per caller, tracked for
+  clean shutdown via closeQueues()). deliveryWorker.ts and dlqWorker.ts now
+  call `connection: createQueueConnection()`.
+
+----------------------------------------------------------------------
+ERROR 10: BullMQ v5 has no 'retrying' event; 'failed' fires on EVERY attempt
+----------------------------------------------------------------------
+SYMPTOM:
+  Trying to listen for a `retrying` event to mark notifications RETRYING
+  failed — the event does not exist in bullmq 5.80.9. The 'failed' event
+  fires on every failed attempt, so a naive handler would move the job to
+  the DLQ after the very first failure.
+
+ROOT CAUSE:
+  BullMQ v5 emits `failed` per attempt; there is no separate retry event.
+
+FIX:
+  In deliveryWorker.ts, branch inside the 'failed' handler on
+  `job.attemptsMade >= (job.opts.attempts || 1)`:
+  - final attempt  -> add job to the DLQ queue + mark notification FAILED
+  - earlier attempt -> mark notification RETRYING (job auto-retries with
+    exponential backoff)
+  Queue config: 4 attempts, backoff { type: 'exponential', delay: 5000 },
+  jobId = eventId (idempotent enqueue).
+
+----------------------------------------------------------------------
+PHASE 5 & 6 - RETRY/DLQ + FINAL VERIFICATION (DONE)
+----------------------------------------------------------------------
+- delivery-service now runs a BullMQ delivery queue + dead-letter queue.
+  Kafka events are enqueued; inline delivery is a fallback if enqueue fails.
+- Notification model gained `deliveryAttempts[]` (channel/status/attemptedAt).
+- notificationStore is idempotent (upsert by eventId) and tracks per-channel
+  delivery status + whole-notification deliveredAt/failedAt.
+- Verified failure path E2E (invalid SendGrid key -> email "Forbidden"):
+    1. POST /events (channels=[email]) -> 202
+    2. delivery logs: Email failed -> "will retry" (attempt 1..3, status retrying)
+    3. attempt 4 -> "exhausted retries, sending to DLQ" -> "Dead-letter job processed"
+    4. Mongo: status=failed, failedAt set, 4 deliveryAttempts, 4 DeliveryLog rows
+- Verified success path E2E: websocket notification delivered via BullMQ,
+  status=delivered, 1 attempt, DeliveryLog row created.
+- FINAL VERIFICATION (Phase 6, full docker compose up -d --build):
+  - turbo run build --force: 13/13 tasks pass
+  - All 10 containers Up; Mongo/Redis/Kafka connected across all services
+  - Health: web :80 200, api-gateway :3000 ok, event-ingestor :3001 ok
+  - Auth: register/login -> JWT -> /auth/me 200; missing/bad token -> 401
+  - Live push + history: socket receives notification:new, event in history
+    (status delivered), unread count 1 -> mark-all-read -> 0
+  - Real email attempt + full retry/DLQ cycle reproduced on the fresh stack
+
+----------------------------------------------------------------------
+ERROR 11: HTTP 429 "Too many requests" on the web UI (notifications fetch)
+----------------------------------------------------------------------
+SYMPTOM:
+  While using the live web UI, the browser console showed:
+    Failed to fetch notifications AxiosError: Request failed with status code 429
+  History/unread calls randomly failed until the page worked again later.
+
+ROOT CAUSE:
+  apps/api-gateway applied a single GLOBAL express-rate-limit of 100 requests
+  per 15 min per IP to EVERY endpoint. Because the gateway ran behind nginx
+  without `app.set('trust proxy', ...)`, express-rate-limit keyed on the
+  nginx container IP, so ALL browser traffic (every user, every reload, every
+  history/unread/mark-read call) shared one 100-request budget. Normal UI
+  usage tripped it within minutes.
+
+FIX:
+  Reworked rate limiting in apps/api-gateway/src/index.ts:
+  - `app.set('trust proxy', 1)` so limits key on the real client IP from
+    nginx's X-Forwarded-For header instead of the shared proxy IP.
+  - Strict limiter ONLY on /auth (max 50 / 15 min) for brute-force protection.
+  - Generous limiter on /notifications, /preferences, /devices
+    (max 1000 / 15 min per client) so the UI never 429s in normal use.
+  - /health stays exempt.
+  Verified: 105 rapid authenticated GET /notifications calls -> all 200,
+  zero 429s.
+
+----------------------------------------------------------------------
+ERROR 12: Infinite React re-render loop caused repeated 429s from the browser
+----------------------------------------------------------------------
+SYMPTOM:
+  After fixing the server rate limits, the browser STILL got 429 on
+  GET /api/notifications. The api-gateway reported RateLimit-Remaining: 999
+  from the host, yet the browser's IP was exhausted within minutes.
+
+ROOT CAUSE:
+  A React infinite loop in the web app. App.tsx ran `refresh()` in a
+  useEffect keyed on `[user, refresh]`. But NotificationContext exposed
+  `refresh` as an inline closure created inside a `useMemo`, and that useMemo
+  recomputed whenever `notifications` changed. Since `refresh()` (fetchNotifications)
+  always calls setNotifications with a fresh array, every request produced a
+  new `notifications` reference -> new useMemo value -> new `refresh` closure
+  -> effect re-ran -> another request -> forever. The browser hammered
+  /api/notifications at dozens of requests/sec, burning the rate-limit budget.
+
+FIX:
+  apps/web/src/context/NotificationContext.tsx now exposes the STABLE
+  useCallback references directly (`refresh`, `markAsRead`, `markAllAsRead`,
+  `loadMore`) instead of wrapping them in inline closures inside useMemo.
+  The App.tsx effect no longer re-runs, so exactly one fetch happens per
+  login instead of an unbounded loop. Deployed a new web bundle
+  (index-Cv61X8_M.js); hard-refresh the browser to pick it up.
+
+ERROR 13: PR #17 (phase/6-final-verification) merge conflict with origin/main
+--------------------------------------------------------------------------
+SYMPTOM:
+  PR #17 showed 26 conflicting files. `git merge origin/main` produced a
+  merge commit, but a `turbo run build --force` FAILED on the web app with
+  errors like "Cannot find name 'toast'", "Property 'fetchNotifications'
+  does not exist", "No exported member 'useAuth'", etc.
+
+ROOT CAUSE:
+  main had a DIFFERENT (older, divergent) web UI implementation. The
+  3-way merge applied main's changes CLEANLY (not as conflicts) into many
+  of our files because they touched different lines, so `-X ours` never
+  kicked in for them. The result was a Frankenstein App.tsx (our providers
+  + main's nav/toast/pages) plus orphaned main-only files that referenced
+  names that no longer existed.
+
+  Files polluted by main but that we own, all restored from aac42a8:
+    - apps/api-gateway/src/index.ts        (main re-added the GLOBAL 100/15min
+                                            rateLimit = the exact ERROR 11 bug!)
+    - apps/delivery-service/src/index.ts   (main added startDeliveryWorker()
+                                            which referenced its own file)
+    - apps/delivery-service/src/channels/{email,push,sms}.ts (log wording only)
+    - apps/ws-gateway/src/socket/connection.ts (main changed origin '*' ->
+                                            env.CORS_ORIGIN + credentials:true)
+    - apps/web/tsconfig.json               (main added "types": ["vite/client"])
+    - apps/web/package.json                (duplicate "firebase" key, main's
+                                            ^10.12.0 + our ^12.17.0 both present)
+    - apps/delivery-service/tsconfig.json  (main added module:commonjs causing
+                                            TS5110 with base moduleResolution)
+    - apps/web/src/App.tsx                 (main's nav bar + toast + pages)
+
+  Deleted main-only orphan files (never part of our implementation):
+    - apps/web/src/components/{Toast,NotificationBell,NotificationDetail,
+       PreferencePanel,PushPermission}/
+    - apps/web/src/pages/{Dashboard,Notifications,Settings}/
+    - apps/web/src/services/socketService.ts
+    - apps/delivery-service/src/services/deliveryQueue.ts (hardcoded
+       localhost:6379 Redis bug, dead code after index.ts restored)
+
+FIX:
+  1) `git checkout aac42a8 -- <each file we own>` to force-restore our
+     verified versions (aac42a8 = phase/6 + the two 429 fixes).
+  2) `git rm` the main-only orphan files.
+  3) `git grep -lE '^(<<<<<<<|>>>>>>>)'` across apps/ -> confirmed no
+     leftover conflict markers.
+  4) `npm install` to resync package-lock.json after restoring
+     apps/web/package.json (removed the duplicate firebase key).
+  5) `./node_modules/.bin/turbo run build --force` -> 13/13 tasks pass.
+  6) Verified the 429 fix survived: api-gateway has trust proxy 1, a strict
+     /auth limiter, a generous /notifications,/preferences,/devices limiter,
+     and NO global rateLimit.
+
+LESSON:
+  After ANY `-X ours` merge, always diff the whole tree against your own
+  pre-merge HEAD (`git diff <your-commit> --stat`) and restore every file
+  you own. "Auto-resolved, no conflicts" does NOT mean your side won.

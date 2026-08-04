@@ -1,30 +1,21 @@
-let audioContext: AudioContext | null = null;
-
-function getAudioContext(): AudioContext {
-  if (!audioContext) {
-    audioContext = new AudioContext();
-  }
-  return audioContext;
-}
-
 export function playNotificationSound(): void {
   try {
-    const ctx = getAudioContext();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
+    const AudioContextCtor: typeof AudioContext | undefined =
+      window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
 
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-
-    oscillator.frequency.setValueAtTime(800, ctx.currentTime);
-    oscillator.frequency.setValueAtTime(1000, ctx.currentTime + 0.1);
-
-    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.3);
-  } catch (err) {
-    console.error('Sound failed:', err);
+    const context = new AudioContextCtor();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0.06;
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.15);
+    oscillator.onended = () => { void context.close(); };
+  } catch {
+    // Audio is a nice-to-have; ignore failures.
   }
 }

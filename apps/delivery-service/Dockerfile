@@ -1,33 +1,16 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-FROM base AS deps
-COPY package.json package-lock.json ./
-COPY packages/shared-types/package.json ./packages/shared-types/
-COPY packages/shared-kafka/package.json ./packages/shared-kafka/
-COPY packages/shared-redis/package.json ./packages/shared-redis/
-COPY packages/shared-db/package.json ./packages/shared-db/
-COPY packages/shared-utils/package.json ./packages/shared-utils/
-COPY packages/shared-logger/package.json ./packages/shared-logger/
-COPY packages/shared-metrics/package.json ./packages/shared-metrics/
-RUN npm ci
+COPY . .
+RUN npm install
+RUN npx turbo run build --filter=@notification-system/delivery-service
 
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/*/node_modules ./packages/*/node_modules
-COPY tsconfig.base.json ./
-COPY packages/shared-types ./packages/shared-types
-COPY packages/shared-kafka ./packages/shared-kafka
-COPY packages/shared-redis ./packages/shared-redis
-COPY packages/shared-db ./packages/shared-db
-COPY packages/shared-utils ./packages/shared-utils
-COPY packages/shared-logger ./packages/shared-logger
-COPY packages/shared-metrics ./packages/shared-metrics
-COPY apps/delivery-service ./apps/delivery-service
-RUN npm run build --workspace=packages/shared-types && npm run build --workspace=packages/shared-kafka && npm run build --workspace=packages/shared-redis && npm run build --workspace=packages/shared-db && npm run build --workspace=packages/shared-utils && npm run build --workspace=packages/shared-logger && npm run build --workspace=packages/shared-metrics && npm run build --workspace=apps/delivery-service
-
-FROM base AS runner
-COPY --from=builder /app/apps/delivery-service/dist ./dist
-COPY --from=builder /app/apps/delivery-service/package.json ./
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
-CMD ["node", "dist/index.js"]
+COPY --from=builder /app/apps/delivery-service ./apps/delivery-service
+COPY --from=builder /app/packages ./packages
+CMD ["node", "apps/delivery-service/dist/index.js"]

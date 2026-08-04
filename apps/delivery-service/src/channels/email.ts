@@ -1,13 +1,22 @@
-import * as sgMail from "@sendgrid/mail";
+import sgMail from '@sendgrid/mail';
 import { createLogger } from '@notification-system/shared-logger';
+import { env } from '../config/env';
 
 const logger = createLogger('delivery-service');
 
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const FROM_EMAIL = process.env.FROM_EMAIL || 'noreply@notificationsystem.com';
+let initialized = false;
 
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
+function isConfigured(): boolean {
+  return Boolean(env.SENDGRID_API_KEY);
+}
+
+function ensureInitialized(): boolean {
+  if (!isConfigured()) return false;
+  if (!initialized) {
+    sgMail.setApiKey(env.SENDGRID_API_KEY!);
+    initialized = true;
+  }
+  return true;
 }
 
 export async function sendEmail(
@@ -15,25 +24,30 @@ export async function sendEmail(
   subject: string,
   html: string,
   text?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; skipped?: boolean }> {
   try {
-    if (!SENDGRID_API_KEY) {
-      logger.warn('SendGrid not configured, skipping email', { to });
-      return { success: true };
+    if (!to) {
+      logger.info('Email skipped: no recipient', { subject });
+      return { success: true, skipped: true };
+    }
+
+    if (!ensureInitialized()) {
+      logger.info('Email skipped: SENDGRID_API_KEY not configured', { to, subject });
+      return { success: true, skipped: true };
     }
 
     await sgMail.send({
       to,
-      from: FROM_EMAIL,
+      from: env.SENDGRID_FROM_EMAIL,
       subject,
       html,
-      text: text || html.replace(/<[^>]*>/g, '')
+      text: text || ''
     });
 
-    logger.info('Email sent successfully', { to, subject });
+    logger.info('Email sent', { to, subject });
     return { success: true };
   } catch (error: any) {
-    logger.error('Email send failed', { to, error: error.message });
+    logger.error('Email failed', { to, error: error.message });
     return { success: false, error: error.message };
   }
 }

@@ -14,6 +14,10 @@ export const env = {
   
   // SendGrid
   SENDGRID_API_KEY: process.env.SENDGRID_API_KEY,
+  SENDGRID_FROM_EMAIL:
+    process.env.SENDGRID_FROM_EMAIL ||
+    process.env.FROM_EMAIL ||
+    'no-reply@notifications.local',
   
   // Twilio
   TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,

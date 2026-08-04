@@ -7,21 +7,21 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@notification-system/shared-db": "*",
+    "@notification-system/shared-kafka": "*",
+    "@notification-system/shared-logger": "*",
+    "@notification-system/shared-metrics": "*",
+    "@notification-system/shared-redis": "*",
+    "@notification-system/shared-types": "*",
+    "@notification-system/shared-utils": "*",
+    "@sendgrid/mail": "^8.1.6",
+    "bullmq": "^5.7.0",
     "dotenv": "^16.4.0",
+    "firebase-admin": "^14.2.0",
+    "ioredis": "^5.4.0",
     "kafkajs": "^2.2.4",
     "mongoose": "^8.4.0",
-    "bullmq": "^5.7.0",
-    "ioredis": "^5.4.0",
-    "@sendgrid/mail": "^8.1.0",
-    "firebase-admin": "^12.0.0",
-    "twilio": "^5.1.0",
-    "@notification-system/shared-types": "*",
-    "@notification-system/shared-kafka": "*",
-    "@notification-system/shared-redis": "*",
-    "@notification-system/shared-db": "*",
-    "@notification-system/shared-utils": "*",
-    "@notification-system/shared-logger": "*",
-    "@notification-system/shared-metrics": "*"
+    "twilio": "^6.0.2"
   },
   "devDependencies": {
     "tsx": "^4.11.0",

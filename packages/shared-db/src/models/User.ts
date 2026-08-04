@@ -4,6 +4,7 @@ import { NotificationChannel } from '@notification-system/shared-types';
 export interface IUser extends Document {
   userId: string;
   email: string;
+  passwordHash?: string;
   phone?: string;
   devices: { token: string; platform: 'ios' | 'android' | 'web' }[];
   preferences: {
@@ -17,7 +18,8 @@ export interface IUser extends Document {
 
 const UserSchema = new Schema<IUser>({
   userId: { type: String, required: true, unique: true, index: true },
-  email: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  passwordHash: { type: String },
   phone: { type: String },
   devices: [{
     token: { type: String, required: true },

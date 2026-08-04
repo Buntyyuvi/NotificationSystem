@@ -1,37 +1,32 @@
-import { useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { useAuth } from '../context/AuthContext';
-import { useNotificationContext } from '../context/NotificationContext';
+import { useEffect, useState } from 'react';
+import { socket } from '../config/socket';
+import type { LiveNotification } from '../types/notification';
+import { playNotificationSound } from '../utils/sound';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:3002';
-
-export function useSocket() {
-  const { token, isLoggedIn } = useAuth();
-  const { addLiveNotification } = useNotificationContext();
-  const socketRef = useRef<Socket | null>(null);
+export function useSocket(onNotification?: (data: LiveNotification) => void) {
+  const [connected, setConnected] = useState<boolean>(socket.connected);
+  const [liveNotifications, setLiveNotifications] = useState<LiveNotification[]>([]);
 
   useEffect(() => {
-    if (!isLoggedIn || !token) return;
+    const handleConnect = (): void => setConnected(true);
+    const handleDisconnect = (): void => setConnected(false);
+    const handleNotification = (data: LiveNotification): void => {
+      playNotificationSound();
+      setLiveNotifications(prev => [data, ...prev].slice(0, 50));
+      onNotification?.(data);
+    };
 
-    const socket = io(WS_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000
-    });
-
-    socket.on('connect', () => console.log('WebSocket connected'));
-    socket.on('disconnect', (reason) => console.log('WebSocket disconnected:', reason));
-    socket.on('notification:new', (data) => addLiveNotification(data));
-
-    socketRef.current = socket;
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('notification:new', handleNotification);
 
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('notification:new', handleNotification);
     };
-  }, [isLoggedIn, token, addLiveNotification]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onNotification]);
 
-  return socketRef.current;
+  return { connected, liveNotifications };
 }
