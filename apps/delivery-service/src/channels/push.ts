@@ -65,7 +65,7 @@ export async function sendPush(
           : undefined
     };
   } catch (error: any) {
-    logger.error('Push failed', { error: error.message });
+    logger.error('Push notification failed', { error: error.message });
     return { success: false, error: error.message };
   }
 }

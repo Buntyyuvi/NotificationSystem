@@ -12,7 +12,6 @@ import { preferenceRoutes } from './routes/preferences';
 import { authMiddleware } from './middleware/auth';
 
 const logger = createLogger('api-gateway');
-
 const app = express();
 
 // Requests arrive via the nginx proxy which sets X-Forwarded-For;
@@ -22,6 +21,7 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
 app.use(express.json());
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 // Brute-force protection: strict limit on auth endpoints only
 const authLimiter = rateLimit({
@@ -62,9 +62,8 @@ app.use('/devices', authMiddleware, deviceRoutes);
 async function start() {
   await connectDB(env.MONGODB_URI);
   logger.info('MongoDB connected');
-
   app.listen(env.PORT, () => {
-    logger.info(`🚀 API Gateway running on port ${env.PORT}`);
+    logger.info(`API Gateway running on port ${env.PORT}`);
   });
 }
 
